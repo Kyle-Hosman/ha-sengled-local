@@ -57,6 +57,13 @@ class Bulb:
         self._support_brightness = support_brightness
         self._jsession_id = jsession_id
         self._country = country
+        self._firmware_version = None  # Will be populated from device data
+        
+        # Atomizer/diffuser specific attributes (if applicable)
+        self._atomizer_switch = None
+        self._atomizer_mode = None 
+        self._atomizer_sleep = None
+        self._water_state = None
         # self._api._subscribe_mqtt(
         #    "wifielement/{}/status".format(self._device_mac),
         #    self.update_status,
@@ -165,6 +172,20 @@ class Bulb:
                             # Update color (format: "r:g:b")
                             if self._support_color and "color" in attrs:
                                 self._color = attrs["color"]
+                            
+                            # Update firmware version if available
+                            if "version" in attrs:
+                                self._firmware_version = attrs["version"]
+                            
+                            # Update atomizer/diffuser attributes if present
+                            if "atomizerSwitch" in attrs:
+                                self._atomizer_switch = attrs["atomizerSwitch"] 
+                            if "atomizerMode" in attrs:
+                                self._atomizer_mode = attrs["atomizerMode"]
+                            if "atomizerSleep" in attrs:
+                                self._atomizer_sleep = attrs["atomizerSleep"]
+                            if "waterState" in attrs:
+                                self._water_state = attrs["waterState"]
                                 
                             _LOGGER.debug("SengledApi: Updated %s - state:%s, brightness:%s", 
                                         self._friendly_name, self._state, self._brightness)

@@ -85,6 +85,23 @@ class SengledBulb(LightEntity):
         return self._device_mac
 
     @property
+    def device_info(self):
+        """Return device information to link this entity with a device."""
+        device_name = self._name.replace(self._device_mac[-5:], "").strip()  # Remove MAC suffix from name
+        if not device_name or device_name.startswith("Sengled"):
+            device_name = f"Sengled {self._device_model}"
+            
+        return {
+            "identifiers": {(DOMAIN, self._device_mac)},
+            "name": device_name,
+            "manufacturer": "Sengled",
+            "model": self._device_model,
+            "sw_version": getattr(self._light, '_firmware_version', None),
+            "connections": {("mac", self._device_mac)},
+            "via_device": None,
+        }
+
+    @property
     def available(self):
         """Return the connection status of this light."""
         _LOGGER.debug("Light.py _available %s", self._available)
@@ -95,18 +112,21 @@ class SengledBulb(LightEntity):
         """Return device attributes of the entity."""
         attributes = {
             ATTR_ATTRIBUTION: ATTRIBUTION,
-            "state": self._state,
-            "available": self._available,
-            "device model": self._device_model,
+            "device_model": self._device_model,
             "rssi": self._device_rssi,
             "mac": self._device_mac,
-            "alarm status ": self._alarm_status,
-            "color": self._color,
-            "color Temp": self._color_temperature,
-            "color r": self._rgb_color_r,
-            "color g": self._rgb_color_g,
-            "color b": self._rgb_color_b,
+            "firmware_version": getattr(self._light, '_firmware_version', 'Unknown'),
         }
+        
+        # Add special attributes for devices with unique features (like diffuser)
+        if hasattr(self._light, '_atomizer_switch'):
+            attributes.update({
+                "atomizer_switch": getattr(self._light, '_atomizer_switch', 'Unknown'),
+                "atomizer_mode": getattr(self._light, '_atomizer_mode', 'Unknown'),
+                "atomizer_sleep": getattr(self._light, '_atomizer_sleep', 'Unknown'),
+                "water_state": getattr(self._light, '_water_state', 'Unknown'),
+            })
+        
         return attributes
 
     @property
