@@ -127,91 +127,58 @@ class Bulb:
         return self._state
 
     async def async_update(self):
-        if self._wifi_device:
-            _LOGGER.info(
-                "SengledApi: Wifi Bulb %s %s is updating",
-                self._friendly_name,
-                self._device_mac,
-            )
-            if not self._just_changed_state:
-                _LOGGER.info(
-                    "SengledApi: Bulb State Change: %s", self._just_changed_state
-                )
-            else:
-                bulbs = []
-                url = "https://life2.cloud.sengled.com/life2/device/list.json"
-                payload = {}
-
-                data = await self._api.async_do_request(url, payload, self._jsession_id)
-
-                _LOGGER.info(
-                    "SengledApi: Wifi Bulb " + self._friendly_name + " updating."
-                )
-                for item in data["deviceList"]:
-                    _LOGGER.debug("SengledApi: Wifi Bulb update return: %s", str(item))
-                    bulbs.append(BulbProperty(self, item, True))
-                for items in bulbs:
-                    if items.uuid == self._device_mac:
-                        self._friendly_name = items.name
-                        self._state = items.switch
-                        self._avaliable = items.isOnline
-                        self._device_rssi = items.device_rssi
-                        # Supported Features
-                        if self._support_brightness:
-                            self._brightness = round(
-                                (int(items.brightness) / 100) * 255
-                            )
-                        if self._support_color_temp:
-                            _LOGGER.debug("SengledApi: Wifi Bulb Colo Temp: %s", items.color_temperature)
-                            self._color_temperature = round(self.translate(int(items.color_temperature), 0, 100, 2000, 6500))
-                        if self._support_color:
-                            _LOGGER.debug("SengledApi: Wifi Bulb Color: %s", items.color)
-                            self._color = items.color
-        else:
-            _LOGGER.info(
-                "Sengled Bulb "
-                + self._friendly_name
-                + " "
-                + self._device_mac
-                + " updating."
-            )
-            if self._just_changed_state:
-                self._just_changed_state = False
-                _LOGGER.info(
-                    "SengledApi: Bulb State Change: %s", self._just_changed_state
-                )
-            else:
-                url = "https://element.cloud.sengled.com/zigbee/device/getDeviceDetails.json"
-                payload = {}
-                bulbs = []
-                data = await self._api.async_do_request(url, payload, self._jsession_id)
-                for item in data["deviceInfos"]:
-                    for devices in item["lampInfos"]:
-                        bulbs.append(BulbProperty(self, devices, False))
-                        for items in bulbs:
-                            if items.uuid == self._device_mac:
-                                self._friendly_name = items.name
-                                self._state = items.switch
-                                self._avaliable = items.isOnline
-                                self._device_rssi = round(
-                                    self.translate(
-                                        int(items.device_rssi), 0, 5, -100, -30
-                                    )
-                                )
-                                # Supported Features
-                                if self._support_brightness:
-                                    self._brightness = items.brightness
-                                if self._support_color:
-                                    self._rgb_color_b = items.rgb_color_b
-                                    self._rgb_color_g = items.rgb_color_g
-                                    self._rgb_color_r = items.rgb_color_r
-                                if self._support_color_temp:
-                                    _LOGGER.debug(
-                                        "color temp %s", items.color_temperature
-                                    )
-                                    self._color_temperature = items.color_temperature
-                                if items.typeCode == "E13-N11":
-                                    self._alarm_status = items.alarm_status
+        """Update device status from local add-on API."""
+        _LOGGER.debug("SengledApi: Bulb %s %s updating from local API", 
+                     self._friendly_name, self._device_mac)
+        
+        # Skip update if we just changed state to avoid race conditions
+        if self._just_changed_state:
+            self._just_changed_state = False
+            _LOGGER.debug("SengledApi: Skipping update - just changed state")
+            return
+        
+        try:
+            import aiohttp
+            from ..sengledapi import SESSION
+            
+            async with aiohttp.ClientSession() as session:
+                url = f"http://{SESSION.addon_host}:{SESSION.addon_port}/api/device/{self._device_mac}"
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        api_response = await response.json()
+                        if api_response.get("success") and "device" in api_response:
+                            attrs = api_response["device"]["attributes"]
+                            
+                            # Update device state from latest data
+                            self._state = attrs.get("switch") == "1"
+                            self._available = True
+                            self._device_rssi = int(attrs.get("deviceRssi", -50))
+                            
+                            # Update brightness (convert 0-100 to 0-255)
+                            if self._support_brightness and "brightness" in attrs:
+                                self._brightness = round((int(attrs["brightness"]) / 100) * 255)
+                            
+                            # Update color temperature (convert 0-100 to 2000-6500K)
+                            if self._support_color_temp and "colorTemperature" in attrs:
+                                temp_percent = int(attrs["colorTemperature"])
+                                self._color_temperature = round(self.translate(temp_percent, 0, 100, 2000, 6500))
+                            
+                            # Update color (format: "r:g:b")
+                            if self._support_color and "color" in attrs:
+                                self._color = attrs["color"]
+                                
+                            _LOGGER.debug("SengledApi: Updated %s - state:%s, brightness:%s", 
+                                        self._friendly_name, self._state, self._brightness)
+                        else:
+                            _LOGGER.warning("Add-on API returned unsuccessful response for %s", self._device_mac)
+                            self._available = False
+                    else:
+                        _LOGGER.warning("Failed to update device %s: HTTP %s", self._device_mac, response.status)
+                        self._available = False
+                        
+        except Exception as e:
+            _LOGGER.error("Error updating device %s: %s", self._device_mac, e)
+            self._available = False
 
     def update_status(self, message):
         """
