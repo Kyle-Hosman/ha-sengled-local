@@ -94,6 +94,13 @@ class SengledApi:
                                         "value": str(attr_value)
                                     })
                                 
+                                # Add a friendly name if not provided
+                                device_name = f"Sengled {device_info.get('attributes', {}).get('typeCode', 'Device')} {mac[-5:]}"
+                                bulb_data["attributeList"].append({
+                                    "name": "name",
+                                    "value": device_name
+                                })
+                                
                                 SESSION.devices.append(BulbProperty(self, bulb_data, True))
                         else:
                             _LOGGER.error("Add-on API returned unsuccessful response: %s", api_response)
@@ -111,24 +118,30 @@ class SengledApi:
 
     async def discover_devices(self):
         _LOGGER.info("SengledApi: List All Bulbs from local add-on.")
+        devices = await self.async_get_devices()
+        _LOGGER.debug("SengledApi: Got %d devices from add-on", len(devices))
+        
         bulbs = []
-        for device in await self.async_get_devices():
-            bulbs.append(
-                Bulb(
-                    self,
-                    device.uuid,
-                    device.name,
-                    device.switch,
-                    device.typeCode,
-                    device.isOnline,
-                    device.support_color,
-                    device.support_color_temp,
-                    device.support_brightness,
-                    None,  # No session ID needed for local MQTT
-                    None,  # No country code needed
-                    True,  # All devices use MQTT now
-                )
+        for device in devices:
+            _LOGGER.debug("SengledApi: Creating bulb for device %s (%s)", device.uuid, device.name)
+            bulb = Bulb(
+                self,
+                device.uuid,
+                device.name,
+                device.switch,
+                device.typeCode,
+                device.isOnline,
+                device.support_color,
+                device.support_color_temp,
+                device.support_brightness,
+                None,  # No session ID needed for local MQTT
+                None,  # No country code needed
+                True,  # All devices use MQTT now
             )
+            bulbs.append(bulb)
+            _LOGGER.debug("SengledApi: Added bulb %s", bulb._friendly_name)
+        
+        _LOGGER.info("SengledApi: Created %d bulb entities", len(bulbs))
         return bulbs
 
     async def async_list_switch(self):
