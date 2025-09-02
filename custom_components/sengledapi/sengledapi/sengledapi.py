@@ -49,6 +49,14 @@ class SengledApi:
     def is_valid_connection(self):
         # For local setup, we just check if MQTT client exists - connection is async
         return SESSION.mqtt_client is not None
+    
+    @property
+    def addon_host(self):
+        return SESSION.addon_host
+    
+    @property  
+    def addon_port(self):
+        return SESSION.addon_port
 
 # Old cloud server discovery methods removed - no longer needed
 

@@ -139,10 +139,9 @@ class Bulb:
         
         try:
             import aiohttp
-            from ..sengledapi import SESSION
-            
+            # Access add-on connection info through the API object  
             async with aiohttp.ClientSession() as session:
-                url = f"http://{SESSION.addon_host}:{SESSION.addon_port}/api/device/{self._device_mac}"
+                url = f"http://{self._api.addon_host}:{self._api.addon_port}/api/device/{self._device_mac}"
                 async with session.get(url) as response:
                     if response.status == 200:
                         api_response = await response.json()
