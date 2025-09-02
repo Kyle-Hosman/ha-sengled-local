@@ -1,6 +1,10 @@
 """Constants for the Sengled Integration."""
 
 DOMAIN = "sengledapi"
-CONF_COUNTRY = "country"
-CONF_TYPE = "wifi"
-ATTRIBUTION = "Data provided by Sengled"
+CONF_ADDON_HOST = "addon_host"
+CONF_ADDON_PORT = "addon_port"
+CONF_MQTT_HOST = "mqtt_host"
+CONF_MQTT_PORT = "mqtt_port"
+CONF_MQTT_USERNAME = "mqtt_username"
+CONF_MQTT_PASSWORD = "mqtt_password"
+ATTRIBUTION = "Data provided by local Sengled add-on"

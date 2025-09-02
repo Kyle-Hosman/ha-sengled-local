@@ -1,5 +1,5 @@
 {
 	"name": "Sengled Bulb Integration",
 	"domains": ["light","switch"],
-	"iot_class": "cloud_poll"
+	"iot_class": "local_push"
 }

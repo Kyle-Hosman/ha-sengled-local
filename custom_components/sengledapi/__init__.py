@@ -8,7 +8,7 @@ from homeassistant.const import (CONF_DEVICES, CONF_PASSWORD, CONF_TIMEOUT,
                                  CONF_USERNAME)
 from homeassistant.helpers import discovery
 
-from .const import CONF_COUNTRY, CONF_TYPE, DOMAIN
+from .const import CONF_ADDON_HOST, CONF_ADDON_PORT, CONF_MQTT_HOST, CONF_MQTT_PORT, CONF_MQTT_USERNAME, CONF_MQTT_PASSWORD, DOMAIN
 from .sengledapi.sengledapi import SengledApi
 
 _LOGGER = logging.getLogger(__name__)
@@ -17,10 +17,12 @@ CONFIG_SCHEMA = vol.Schema(
     {
         DOMAIN: vol.Schema(
             {
-                vol.Required(CONF_USERNAME): cv.string,
-                vol.Required(CONF_PASSWORD): cv.string,
-                vol.Required(CONF_COUNTRY): cv.string,
-                vol.Optional(CONF_TYPE, default=False): cv.boolean,
+                vol.Optional(CONF_ADDON_HOST, default="localhost"): cv.string,
+                vol.Optional(CONF_ADDON_PORT, default=54448): cv.port,
+                vol.Optional(CONF_MQTT_HOST, default="localhost"): cv.string,
+                vol.Optional(CONF_MQTT_PORT, default=1883): cv.port,
+                vol.Optional(CONF_MQTT_USERNAME): cv.string,
+                vol.Optional(CONF_MQTT_PASSWORD): cv.string,
             }
         )
     },
@@ -46,23 +48,25 @@ async def async_setup(hass, config):
         _LOGGER.info("""Creating new SengledApi component""")
 
         sengledapi_account = SengledApi(
-            config[DOMAIN].get(CONF_USERNAME),
-            config[DOMAIN].get(CONF_PASSWORD),
-            config[DOMAIN].get(CONF_COUNTRY),
-            config[DOMAIN].get(CONF_TYPE),
+            config[DOMAIN].get(CONF_ADDON_HOST),
+            config[DOMAIN].get(CONF_ADDON_PORT),
+            config[DOMAIN].get(CONF_MQTT_HOST),
+            config[DOMAIN].get(CONF_MQTT_PORT),
+            config[DOMAIN].get(CONF_MQTT_USERNAME),
+            config[DOMAIN].get(CONF_MQTT_PASSWORD),
         )
         await sengledapi_account.async_init()
 
-        if not sengledapi_account.is_valid_login():
+        if not sengledapi_account.is_valid_connection():
             _LOGGER.error(
-                "SengledApi Not connected to Sengled account. Unable to add devices. Check your configuration."
+                "SengledApi Not connected to local MQTT broker. Unable to add devices. Check your configuration."
             )
             return False
 
-        _LOGGER.info("SengledApi Connected to Sengled account")
+        _LOGGER.info("SengledApi Connected to local MQTT broker")
 
+        # All devices are discovered via MQTT now - no separate wifi/zigbee distinction
         sengledapi_devices = await sengledapi_account.async_get_devices()
-        sengledapiwifi_devices = await sengledapi_account.async_get_wifi_devices()
 
         # Store the logged in account object for the platforms to use.
         _LOGGER.info(
@@ -74,11 +78,9 @@ async def async_setup(hass, config):
         # Start up lights and switch components
         if sengledapi_devices:
             await discovery.async_load_platform(hass, "light", DOMAIN, {}, config)
-        elif sengledapiwifi_devices:
-            await discovery.async_load_platform(hass, "light", DOMAIN, {}, config)
         else:
             _LOGGER.error(
-                "SengledApi: SengledApi authenticated but could not find any devices."
+                "SengledApi: Connected to MQTT broker but could not find any devices."
             )
 
     return True

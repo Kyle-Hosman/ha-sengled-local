@@ -74,17 +74,7 @@ class Bulb:
                 self._friendly_name,
                 self._device_mac,
             )
-            data = {
-                "dn": self._device_mac,
-                "type": "switch",
-                "value": onoff,
-                "time": int(time.time() * 1000),
-            }
-
-            self._api.publish_mqtt(
-                "wifielement/{}/update".format(self._device_mac),
-                json.dumps(data),
-            )
+            self._api.publish_mqtt(self._device_mac, "switch", onoff)
         else:
             _LOGGER.info(
                 "SengledApi: Bulb %s %s turning on.",
@@ -123,17 +113,7 @@ class Bulb:
                 str(brightness_precentage),
             )
 
-            data_brightness = {
-                "dn": self._device_mac,
-                "type": "brightness",
-                "value": str(brightness_precentage),
-                "time": int(time.time() * 1000),
-            }
-
-            self._api.publish_mqtt(
-                "wifielement/{}/update".format(self._device_mac),
-                json.dumps(data_brightness),
-            )
+            self._api.publish_mqtt(self._device_mac, "brightness", str(brightness_precentage))
         else:
             _LOGGER.info(
                 "Bulb %s %s setting brightness.", self._friendly_name, self._device_mac
@@ -168,17 +148,7 @@ class Bulb:
                 color_temperature_precentage,
             )
 
-            data_color_temperature = {
-                "dn": self._device_mac,
-                "type": "colorTemperature",
-                "value": str(color_temperature_precentage),
-                "time": int(time.time() * 1000),
-            }
-
-            self._api.publish_mqtt(
-                "wifielement/{}/update".format(self._device_mac),
-                json.dumps(data_color_temperature),
-            )
+            self._api.publish_mqtt(self._device_mac, "colorTemperature", str(color_temperature_precentage))
         else:
             _LOGGER.info(
                 "Bulb %s %s Set Color Temperature %s.",
@@ -214,17 +184,7 @@ class Bulb:
                 + " .Setting Color"
             )
 
-            data_color = {
-                "dn": self._device_mac,
-                "type": "color",
-                "value": self.convert_color_HA(color),
-                "time": int(time.time() * 1000),
-            }
-
-            self._api.publish_mqtt(
-                "wifielement/{}/update".format(self._device_mac),
-                json.dumps(data_color),
-            )
+            self._api.publish_mqtt(self._device_mac, "color", self.convert_color_HA(color))
         else:
             _LOGGER.info(
                 "SengledApi: Color Bulb %s %s Setting Color",

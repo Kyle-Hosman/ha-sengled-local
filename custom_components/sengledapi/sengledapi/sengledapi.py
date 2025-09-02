@@ -20,39 +20,35 @@ _LOGGER = logging.getLogger(__name__)
 
 class SengledSession:
 
-    username = ""
-    password = ""
-    countryCode = ""
-    wifi = False
-    device_id = uuid4().hex[:-16]
-    jsession_id = ""
-    mqtt_server = {
-        "host": "us-mqtt.cloud.sengled.com",
-        "port": 443,
-        "path": "/mqtt",
-    }
+    addon_host = "localhost"
+    addon_port = 8080
+    mqtt_host = "localhost"
+    mqtt_port = 1883
+    mqtt_username = None
+    mqtt_password = None
     mqtt_client = None
     subscribe = {}
     devices = []
-    wifi_devices = []
 
 
 SESSION = SengledSession()
 
 
 class SengledApi:
-    def __init__(self, user_name, password, country, wifi):
-        _LOGGER.info("Sengled Api initializing.")
-        SESSION.username = user_name
-        SESSION.password = password
-        SESSION.countryCode = country
-        SESSION.wifi = wifi
+    def __init__(self, addon_host, addon_port, mqtt_host, mqtt_port, mqtt_username, mqtt_password):
+        _LOGGER.info("Local Sengled Api initializing.")
+        SESSION.addon_host = addon_host
+        SESSION.addon_port = addon_port
+        SESSION.mqtt_host = mqtt_host
+        SESSION.mqtt_port = mqtt_port
+        SESSION.mqtt_username = mqtt_username
+        SESSION.mqtt_password = mqtt_password
 
     async def async_init(self):
-        _LOGGER.info("Sengled Api initializing async.")
-        self._access_token = await self.async_login(
-            SESSION.username, SESSION.password, SESSION.device_id
-        )
+        _LOGGER.info("Local Sengled Api initializing async.")
+        # No authentication needed - just initialize MQTT connection
+        self.initialize_mqtt()
+        return True
 
     async def async_login(self, username, password, device_id):
         """
@@ -94,10 +90,8 @@ class SengledApi:
 
         return True
 
-    def is_valid_login(self):
-        if SESSION.jsession_id is None:
-            return False
-        return True
+    def is_valid_connection(self):
+        return SESSION.mqtt_client is not None and SESSION.mqtt_client.is_connected()
 
     async def async_is_session_timeout(self):
         """
@@ -150,43 +144,63 @@ class SengledApi:
             SESSION.mqtt_server["path"] = url.path
         _LOGGER.debug("SengledApi: Parse MQTT Server Info" + str(url))
 
-    async def async_get_wifi_devices(self):
+    async def async_get_devices_from_addon(self):
         """
-        Get list of Wifi connected devices.
+        Get list of devices from local add-on API.
         """
-        if not SESSION.wifi_devices:
-            url = "https://life2.cloud.sengled.com/life2/device/list.json"
-            payload = {}
-            data = await self.async_do_request(url, payload, SESSION.jsession_id)
-            if "deviceList" not in data or not data["deviceList"]:
-                return SESSION.wifi_devices
-            for devices in data["deviceList"]:
-                found = False
-
-                for dev in SESSION.wifi_devices:
-                    if dev.uuid == devices["deviceUuid"]:
-                        found = True
-                        break
-                if not found:
-                    _LOGGER.debug("SengledApi: Get Wifi Mqtt Devices %s", devices)
-                    SESSION.wifi_devices.append(BulbProperty(self, devices, True))
-        return SESSION.wifi_devices
-
-    async def async_get_devices(self):
-        _LOGGER.debug("SengledApi: Get Devices.")
-        if not SESSION.devices:
-            url = (
-                "https://element.cloud.sengled.com/zigbee/device/getDeviceDetails.json"
-            )
-            payload = {}
-            data = await self.async_do_request(url, payload, SESSION.jsession_id)
-            for d in data["deviceInfos"]:
-                for devices in d["lampInfos"]:
-                    SESSION.devices.append(BulbProperty(self, devices, False))
+        import aiohttp
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"http://{SESSION.addon_host}:{SESSION.addon_port}/api/devices"
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        api_response = await response.json()
+                        _LOGGER.debug("SengledApi: Got devices from add-on: %s", api_response)
+                        
+                        if api_response.get("success") and "devices" in api_response:
+                            # Clear existing devices and repopulate
+                            SESSION.devices = []
+                            devices_data = api_response["devices"]
+                            
+                            for mac, device_info in devices_data.items():
+                                # Convert add-on format to BulbProperty format
+                                bulb_data = {
+                                    "deviceUuid": mac,
+                                    "attributeList": []
+                                }
+                                
+                                # Add capabilities as supportAttributes
+                                capabilities = device_info.get("capabilities", [])
+                                bulb_data["attributeList"].append({
+                                    "name": "supportAttributes", 
+                                    "value": ",".join(capabilities)
+                                })
+                                
+                                # Convert attributes dict to attributeList format
+                                for attr_name, attr_value in device_info.get("attributes", {}).items():
+                                    bulb_data["attributeList"].append({
+                                        "name": attr_name,
+                                        "value": str(attr_value)
+                                    })
+                                
+                                SESSION.devices.append(BulbProperty(self, bulb_data, True))
+                        else:
+                            _LOGGER.error("Add-on API returned unsuccessful response: %s", api_response)
+                    else:
+                        _LOGGER.error("Failed to get devices from add-on API: %s", response.status)
+        except Exception as e:
+            _LOGGER.error("Error connecting to add-on API: %s", e)
+        
         return SESSION.devices
 
+    async def async_get_devices(self):
+        """Get devices from local add-on instead of cloud API."""
+        _LOGGER.debug("SengledApi: Get Devices from local add-on.")
+        return await self.async_get_devices_from_addon()
+
     async def discover_devices(self):
-        _LOGGER.info("SengledApi: List All Bulbs.")
+        _LOGGER.info("SengledApi: List All Bulbs from local add-on.")
         bulbs = []
         for device in await self.async_get_devices():
             bulbs.append(
@@ -200,29 +214,11 @@ class SengledApi:
                     device.support_color,
                     device.support_color_temp,
                     device.support_brightness,
-                    SESSION.jsession_id,
-                    SESSION.countryCode,
-                    False,
+                    None,  # No session ID needed for local MQTT
+                    None,  # No country code needed
+                    True,  # All devices use MQTT now
                 )
             )
-        if SESSION.wifi:
-            for device in await self.async_get_wifi_devices():
-                bulbs.append(
-                    Bulb(
-                        self,
-                        device.uuid,
-                        device.name,
-                        device.switch,
-                        device.typeCode,
-                        device.isOnline,
-                        device.support_color,
-                        device.support_color_temp,
-                        device.support_brightness,
-                        SESSION.jsession_id,
-                        SESSION.countryCode,
-                        True,
-                    )
-                )
         return bulbs
 
     async def async_list_switch(self):
@@ -274,49 +270,43 @@ class SengledApi:
             )
 
     def initialize_mqtt(self):
-        _LOGGER.info("SengledApi: Initialize the MQTT connection")
-        if not SESSION.jsession_id:
-            return False
+        _LOGGER.info("SengledApi: Initialize local MQTT connection")
 
-        def on_message(api, userdata, msg):
+        def on_message(client, userdata, msg):
+            _LOGGER.debug("MQTT message received: %s %s", msg.topic, msg.payload)
             if msg.topic in SESSION.subscribe:
                 SESSION.subscribe[msg.topic](msg.payload)
 
-        import concurrent.futures
-        import functools
-        import ssl
+        def on_connect(client, userdata, flags, rc):
+            if rc == 0:
+                _LOGGER.info("Connected to local MQTT broker")
+            else:
+                _LOGGER.error("Failed to connect to MQTT broker: %s", rc)
 
-        # Create SSL context in a separate thread to avoid blocking
-        def create_ssl_context():
-            context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
-            context.load_default_certs(ssl.Purpose.SERVER_AUTH)
-            return context
+        def on_disconnect(client, userdata, rc):
+            _LOGGER.warning("Disconnected from MQTT broker: %s", rc)
 
-        SESSION.mqtt_client = mqtt.Client(
-            client_id="{}@lifeApp".format(SESSION.jsession_id), transport="websockets"
-        )
-        
-        # Run the blocking operation in a separate thread
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            ssl_context = executor.submit(create_ssl_context).result()
-            SESSION.mqtt_client.tls_set_context(ssl_context)
-            
-        SESSION.mqtt_client.ws_set_options(
-            path=SESSION.mqtt_server["path"],
-            headers={
-                "Cookie": "JSESSIONID={}".format(SESSION.jsession_id),
-                "X-Requested-With": "com.sengled.life2",
-            },
-        )
+        SESSION.mqtt_client = mqtt.Client(client_id="sengled_local_integration")
         SESSION.mqtt_client.on_message = on_message
-        SESSION.mqtt_client.connect(
-            SESSION.mqtt_server["host"],
-            port=SESSION.mqtt_server["port"],
-            keepalive=30,
-        )
-        SESSION.mqtt_client.loop_start()
-        _LOGGER.info("SengledApi: Start mqtt loop")
-        return True
+        SESSION.mqtt_client.on_connect = on_connect
+        SESSION.mqtt_client.on_disconnect = on_disconnect
+
+        # Set credentials if provided
+        if SESSION.mqtt_username and SESSION.mqtt_password:
+            SESSION.mqtt_client.username_pw_set(SESSION.mqtt_username, SESSION.mqtt_password)
+
+        # Connect to local broker (no SSL, no websockets)
+        try:
+            SESSION.mqtt_client.connect(
+                SESSION.mqtt_host,
+                port=SESSION.mqtt_port,
+                keepalive=60,
+            )
+            SESSION.mqtt_client.loop_start()
+            return True
+        except Exception as e:
+            _LOGGER.error("Failed to connect to local MQTT broker: %s", e)
+            return False
 
     def reinitialize_mqtt(self):
         _LOGGER.info("SengledApi: Re-initialize the MQTT connection")
@@ -339,13 +329,33 @@ class SengledApi:
 
         return True
 
-    def publish_mqtt(self, topic, payload=None):
-        _LOGGER.info("SengledApi: Publish MQTT message")
+    def publish_mqtt(self, device_mac, command_type, value):
+        """Publish command in the format expected by local add-on"""
+        _LOGGER.info("SengledApi: Publishing MQTT command to %s: %s=%s", device_mac, command_type, value)
+        
         if SESSION.mqtt_client is None:
+            _LOGGER.error("MQTT client not initialized")
             return False
 
-        r = SESSION.mqtt_client.publish(topic, payload=payload)
+        topic = f"wifielement/{device_mac}/update"
+        
+        # Create payload in format: [{"dn": "MAC", "type": "command", "value": "value", "time": timestamp}]
+        import time
+        payload = [{
+            "dn": device_mac,
+            "type": command_type,
+            "value": str(value),
+            "time": int(time.time() * 1000)  # Unix timestamp in milliseconds
+        }]
+        
+        import json
+        payload_json = json.dumps(payload)
+        
+        _LOGGER.debug("Publishing to topic %s: %s", topic, payload_json)
+        
+        r = SESSION.mqtt_client.publish(topic, payload=payload_json)
         _LOGGER.debug("SengledApi: Publish Mqtt %s", str(r))
+        
         try:
             r.wait_for_publish()
             return r.is_published
