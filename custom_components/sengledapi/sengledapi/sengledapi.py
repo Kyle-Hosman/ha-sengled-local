@@ -75,6 +75,8 @@ class SengledApi:
                                 # Convert add-on format to BulbProperty format
                                 bulb_data = {
                                     "deviceUuid": mac,
+                                    "category": "wifielement",  # All local devices are wifielement category
+                                    "typeCode": device_info.get("attributes", {}).get("typeCode", "unknown"),
                                     "attributeList": []
                                 }
                                 
