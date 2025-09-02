@@ -68,106 +68,43 @@ class Bulb:
             self._state = True
         else:
             self._state = False
-        if self._wifi_device:
-            _LOGGER.info(
-                "SengledApi: Wifi Bulb %s %s turning on.",
-                self._friendly_name,
-                self._device_mac,
-            )
-            self._api.publish_mqtt(self._device_mac, "switch", onoff)
-        else:
-            _LOGGER.info(
-                "SengledApi: Bulb %s %s turning on.",
-                self._friendly_name,
-                self._device_mac,
-            )
-            url = (
-                HTTPS
-                + self._country
-                + "-elements.cloud.sengled.com/zigbee/device/deviceSetOnOff.json"
-            )
-
-            payload = {"deviceUuid": self._device_mac, "onoff": onoff}
-
-            loop = asyncio.get_running_loop()
-            loop.create_task(
-                self._api.async_do_request(url, payload, self._jsession_id)
-            )
+        # All devices now use local MQTT
+        _LOGGER.info(
+            "SengledApi: Bulb %s %s turning %s via MQTT.",
+            self._friendly_name,
+            self._device_mac,
+            "on" if onoff == "1" else "off"
+        )
+        self._api.publish_mqtt(self._device_mac, "switch", onoff)
 
     async def async_set_brightness(self, brightness):
         """Set Bulb Brightness"""
-        if self._wifi_device:
-            _LOGGER.info(
-                "Wifi Bulb %s %s setting brightness %s, This is from HA ",
-                self._friendly_name,
-                self._device_mac,
-                str(brightness),
-            )
+        # All devices now use local MQTT
+        brightness_precentage = round((brightness / 255) * 100)
 
-            brightness_precentage = round((brightness / 255) * 100)
+        _LOGGER.info(
+            "SengledApi: Bulb %s %s setting brightness %s via MQTT",
+            self._friendly_name,
+            self._device_mac,
+            str(brightness_precentage),
+        )
 
-            _LOGGER.info(
-                "SengledApi: Wifi Color Bulb %s %s setting Brighness %s, This is what we are setting Sengled API",
-                self._friendly_name,
-                self._device_mac,
-                str(brightness_precentage),
-            )
-
-            self._api.publish_mqtt(self._device_mac, "brightness", str(brightness_precentage))
-        else:
-            _LOGGER.info(
-                "Bulb %s %s setting brightness.", self._friendly_name, self._device_mac
-            )
-
-            url = HTTPS + self._country + SET_BRIGHTNESS
-
-            payload = {"deviceUuid": self._device_mac, "brightness": brightness}
-
-            loop = asyncio.get_running_loop()
-            loop.create_task(
-                self._api.async_do_request(url, payload, self._jsession_id)
-            )
+        self._api.publish_mqtt(self._device_mac, "brightness", str(brightness_precentage))
 
     async def async_color_temperature(self, color_temperature):
+        """Set Color Temperature"""
         _LOGGER.info(
-            "Wifi Bulb %s %s setting color Temperature %s, This is from HA ",
+            "SengledApi: Bulb %s %s setting color temperature %s via MQTT",
             self._friendly_name,
             self._device_mac,
             str(color_temperature),
         )
-        """Set Color Temperature"""
+        
         color_temperature_precentage = round(
             self.translate(int(color_temperature), 200, 6500, 1, 100)
         )
 
-        if self._wifi_device:
-            _LOGGER.info(
-                "SengledApi: Wifi Color Bulb %s %s Set Color Temperature %s, This is what we are setting Sengled API",
-                self._friendly_name,
-                self._device_mac,
-                color_temperature_precentage,
-            )
-
-            self._api.publish_mqtt(self._device_mac, "colorTemperature", str(color_temperature_precentage))
-        else:
-            _LOGGER.info(
-                "Bulb %s %s Set Color Temperature %s.",
-                self._friendly_name,
-                self._device_mac,
-                color_temperature_precentage,
-            )
-
-            url = HTTPS + self._country + SET_COLOR_TEMPERATURE
-
-            payload = {
-                "deviceUuid": self._device_mac,
-                "colorTemperature": color_temperature_precentage,
-            }
-
-            loop = asyncio.get_running_loop()
-            loop.create_task(
-                self._api.async_do_request(url, payload, self._jsession_id)
-            )
+        self._api.publish_mqtt(self._device_mac, "colorTemperature", str(color_temperature_precentage))
 
     async def async_set_color(self, color):
         """
@@ -175,46 +112,15 @@ class Bulb:
         device_id: A single device ID or a list to update multiple at once
         color: [red(0-255), green(0-255), blue(0-255)]
         """
-        if self._wifi_device:
-            _LOGGER.info(
-                "SengledApi: Wifi Color Bulb "
-                + self._friendly_name
-                + " "
-                + self._device_mac
-                + " .Setting Color"
-            )
+        # All devices now use local MQTT
+        _LOGGER.info(
+            "SengledApi: Bulb %s %s setting color via MQTT",
+            self._friendly_name,
+            self._device_mac,
+        )
 
-            self._api.publish_mqtt(self._device_mac, "color", self.convert_color_HA(color))
-        else:
-            _LOGGER.info(
-                "SengledApi: Color Bulb %s %s Setting Color",
-                self._friendly_name,
-                self._device_mac,
-            )
-
-            mycolor = str(color)
-            for r in ((" ", ""), (",", ","), ("(", ""), (")", "")):
-                mycolor = mycolor.replace(*r)
-                a, b, c = mycolor.split(",")
-
-            _LOGGER.info("SengledApi: Set Color R %s G %s B %s", int(a), int(b), int(c))
-
-            url = HTTPS + self._country + SET_GROUP
-
-            payload = {
-                "cmdId": 129,
-                "deviceUuidList": [{"deviceUuid": self._device_mac}],
-                "rgbColorR": int(a),
-                "rgbColorG": int(b),
-                "rgbColorB": int(c),
-            }
-
-            self._state = True
-
-            loop = asyncio.get_running_loop()
-            loop.create_task(
-                self._api.async_do_request(url, payload, self._jsession_id)
-            )
+        self._api.publish_mqtt(self._device_mac, "color", self.convert_color_HA(color))
+        self._state = True
 
     def is_on(self):
         """Get State"""

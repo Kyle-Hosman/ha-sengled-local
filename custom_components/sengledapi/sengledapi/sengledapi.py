@@ -1,18 +1,13 @@
 #!/usr/bin/python3
-"""Sengled Bulb Integration."""
+"""Local Sengled Bulb Integration."""
 import json
 import logging
 import time
-from urllib.parse import urlparse
-from uuid import uuid4
 
 import paho.mqtt.client as mqtt
-import requests
 
 from .devices.bulbs.bulb import Bulb
 from .devices.bulbs.bulbproperty import BulbProperty
-from .devices.exceptions import SengledApiAccessToken
-from .devices.request import Request
 from .devices.switch import Switch
 
 _LOGGER = logging.getLogger(__name__)
@@ -47,102 +42,15 @@ class SengledApi:
     async def async_init(self):
         _LOGGER.info("Local Sengled Api initializing async.")
         # No authentication needed - just initialize MQTT connection
-        self.initialize_mqtt()
-        return True
+        return await self.async_initialize_mqtt()
 
-    async def async_login(self, username, password, device_id):
-        """
-        Log user into server.
-        Returns True on success, False on failure.
-        """
-        _LOGGER.info("Sengledapi: Login")
-
-        if SESSION.jsession_id:
-            if not await self.async_is_session_timeout():
-                return
-
-        url = "https://ucenter.cloud.sengled.com/user/app/customer/v2/AuthenCross.json"
-        payload = {
-            "uuid": SESSION.device_id,
-            "user": SESSION.username,
-            "pwd": SESSION.password,
-            "osType": "android",
-            "productCode": "life",
-            "appCode": "life",
-        }
-
-        data = await self.async_do_login_request(url, payload)
-
-        _LOGGER.debug("SengledApi Login %s", str(data))
-
-        if "jsessionId" not in data or not data["jsessionId"]:
-            return False
-
-        SESSION.jsession_id = data["jsessionId"]
-
-        if SESSION.wifi:
-            await self.async_get_server_info()
-
-            if not SESSION.mqtt_client:
-                self.initialize_mqtt()
-            else:
-                self.reinitialize_mqtt()
-
-        return True
+# Old cloud authentication methods removed - no longer needed for local setup
 
     def is_valid_connection(self):
-        return SESSION.mqtt_client is not None and SESSION.mqtt_client.is_connected()
+        # For local setup, we just check if MQTT client exists - connection is async
+        return SESSION.mqtt_client is not None
 
-    async def async_is_session_timeout(self):
-        """
-        Determine whether or not the session has timed out.
-        Returns True if timed out, False otherwise.
-        """
-        _LOGGER.info("SengledApi: Session Timeout")
-
-        if not SESSION.jsession_id:
-            return True
-
-        url = "https://ucenter.cloud.sengled.com/user/app/customer/isSessionTimeout.json"  # noqa
-        payload = {
-            "uuid": SESSION.device_id,
-            "os_type": "android",
-            "appCode": "life",
-        }
-
-        data = await self.async_do_is_session_timeout_request(url, payload)
-
-        _LOGGER.debug("SengledApi: async_is_session_timeout " + str(data))
-
-        if "info" not in data or data["info"] != "OK":
-            return True
-
-        return False
-
-    async def async_get_server_info(self):
-        """Get secondary server info from the primary."""
-        if not SESSION.jsession_id:
-            return
-        url = "https://life2.cloud.sengled.com/life2/server/getServerInfo.json"
-        payload = {}
-
-        data = await self.async_do_request(url, payload, SESSION.jsession_id)
-
-        _LOGGER.debug("SengledApi: Get MQTT Server Info" + str(data))
-
-        if "inceptionAddr" not in data or not data["inceptionAddr"]:
-            return
-
-        url = urlparse(data["inceptionAddr"])
-        if ":" in url.netloc:
-            SESSION.mqtt_server["host"] = url.netloc.split(":")[0]
-            SESSION.mqtt_server["port"] = int(url.netloc.split(":")[1], 10)
-            SESSION.mqtt_server["path"] = url.path
-        else:
-            SESSION.mqtt_server["host"] = url.netloc
-            SESSION.mqtt_server["port"] = 443
-            SESSION.mqtt_server["path"] = url.path
-        _LOGGER.debug("SengledApi: Parse MQTT Server Info" + str(url))
+# Old cloud server discovery methods removed - no longer needed
 
     async def async_get_devices_from_addon(self):
         """
@@ -242,35 +150,13 @@ class SengledApi:
                         )
         return switch
 
-    async def async_do_request(self, url, payload, jsessionId):
-        try:
-            return await Request(url, payload).async_get_response(jsessionId)
-        except Exception as e:
-            _LOGGER.error("Error in async_do_request: %s", e)
-            raise
+# Old cloud HTTP request methods removed - no longer needed
 
-    async def async_do_login_request(self, url, payload):
-        _LOGGER.info("SengledApi: Login Request.")
-        try:
-            return await Request(url, payload).async_get_login_response()
-        except Exception as e:
-            _LOGGER.error("Error in async_do_login_request: %s", e)
-            return Request(url, payload).get_login_response()
-
-    async def async_do_is_session_timeout_request(self, url, payload):
-        _LOGGER.info("SengledApi: Sengled Api doing request.")
-        try:
-            return await Request(url, payload).async_is_session_timeout_response(
-                SESSION.jsession_id
-            )
-        except Exception as e:
-            _LOGGER.error("Error in async_do_is_session_timeout_request: %s", e)
-            return Request(url, payload).is_session_timeout_response(
-                SESSION.jsession_id
-            )
-
-    def initialize_mqtt(self):
+    async def async_initialize_mqtt(self):
         _LOGGER.info("SengledApi: Initialize local MQTT connection")
+        import asyncio
+
+        connection_result = {"connected": False}
 
         def on_message(client, userdata, msg):
             _LOGGER.debug("MQTT message received: %s %s", msg.topic, msg.payload)
@@ -280,8 +166,10 @@ class SengledApi:
         def on_connect(client, userdata, flags, rc):
             if rc == 0:
                 _LOGGER.info("Connected to local MQTT broker")
+                connection_result["connected"] = True
             else:
                 _LOGGER.error("Failed to connect to MQTT broker: %s", rc)
+                connection_result["connected"] = False
 
         def on_disconnect(client, userdata, rc):
             _LOGGER.warning("Disconnected from MQTT broker: %s", rc)
@@ -297,37 +185,47 @@ class SengledApi:
 
         # Connect to local broker (no SSL, no websockets)
         try:
-            SESSION.mqtt_client.connect(
+            SESSION.mqtt_client.connect_async(
                 SESSION.mqtt_host,
                 port=SESSION.mqtt_port,
                 keepalive=60,
             )
             SESSION.mqtt_client.loop_start()
-            return True
+            
+            # Wait a bit for connection to establish
+            for _ in range(10):  # Wait up to 1 second
+                await asyncio.sleep(0.1)
+                if connection_result["connected"]:
+                    return True
+                    
+            _LOGGER.warning("MQTT connection taking longer than expected, continuing anyway")
+            return True  # Continue even if connection is slow
+            
         except Exception as e:
             _LOGGER.error("Failed to connect to local MQTT broker: %s", e)
             return False
 
     def reinitialize_mqtt(self):
-        _LOGGER.info("SengledApi: Re-initialize the MQTT connection")
-        if SESSION.mqtt_client is None or not SESSION.jsession_id:
+        _LOGGER.info("SengledApi: Re-initialize local MQTT connection")
+        if SESSION.mqtt_client is None:
             return False
 
         SESSION.mqtt_client.loop_stop()
         SESSION.mqtt_client.disconnect()
-        SESSION.mqtt_client.ws_set_options(
-            path=SESSION.mqtt_server["path"],
-            headers={
-                "Cookie": "JSESSIONID={}".format(SESSION.jsession_id),
-            },
-        )
-        SESSION.mqtt_client.reconnect()
-        SESSION.mqtt_client.loop_start()
-
-        for topic in SESSION.subscribe:
-            self.subscribe_mqtt(topic, SESSION.subscribe[topic])
-
-        return True
+        
+        # Simple reconnection for local broker
+        try:
+            SESSION.mqtt_client.reconnect()
+            SESSION.mqtt_client.loop_start()
+            
+            # Re-subscribe to all topics
+            for topic in SESSION.subscribe:
+                self.subscribe_mqtt(topic, SESSION.subscribe[topic])
+                
+            return True
+        except Exception as e:
+            _LOGGER.error("Failed to reinitialize MQTT: %s", e)
+            return False
 
     def publish_mqtt(self, device_mac, command_type, value):
         """Publish command in the format expected by local add-on"""
