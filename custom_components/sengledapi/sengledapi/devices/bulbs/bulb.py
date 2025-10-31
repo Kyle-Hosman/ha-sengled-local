@@ -41,7 +41,6 @@ class Bulb:
         self._friendly_name = friendly_name
         self._state = state
         self._available = isonline
-        self._just_changed_state = True
         self._device_model = device_model
         self._device_rssi = -30
         self._brightness = 255
@@ -137,13 +136,6 @@ class Bulb:
         """Update device status from local add-on API."""
         _LOGGER.debug("SengledApi: Bulb %s %s updating from local API", 
                      self._friendly_name, self._device_mac)
-        
-        # Skip update if we just changed state to avoid race conditions
-        if self._just_changed_state:
-            self._just_changed_state = False
-            _LOGGER.debug("SengledApi: Skipping update - just changed state")
-            return
-        
         try:
             import aiohttp
             # Access add-on connection info through the API object  
@@ -154,11 +146,20 @@ class Bulb:
                         api_response = await response.json()
                         if api_response.get("success") and "device" in api_response:
                             attrs = api_response["device"]["attributes"]
-                            
-                            # Update device state from latest data
-                            self._state = attrs.get("switch") == "1"
+
+                            # Update device availability and signal strength
                             self._available = True
                             self._device_rssi = int(attrs.get("deviceRssi", -50))
+
+                            # Only update state from API if it's actually different and makes sense
+                            # This prevents the add-on's potentially stale state from overriding our commands
+                            api_state = attrs.get("switch") == "1"
+                            if api_state != self._state:
+                                _LOGGER.warning(
+                                    "SengledApi: State mismatch for %s - local:%s, API:%s - keeping local state",
+                                    self._friendly_name, self._state, api_state
+                                )
+                            # Don't update self._state from API - trust the local state we set
                             
                             # Update brightness (convert 0-100 to 0-255)
                             if self._support_brightness and "brightness" in attrs:

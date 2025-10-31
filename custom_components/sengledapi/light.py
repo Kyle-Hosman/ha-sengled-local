@@ -175,15 +175,22 @@ class SengledBulb(LightEntity):
     @property
     def supported_color_modes(self):
         """Return the supported color modes for the light."""
-        # A light entity can only support one primary color mode.
-        # The priorities should be: HS > COLOR_TEMP > BRIGHTNESS > ONOFF
+        modes = set()
+
+        # Bulbs can support multiple color modes
         if self._support_color:
-            return {ColorMode.HS}
-        elif self._support_color_temp:
-            return {ColorMode.COLOR_TEMP}
-        elif self._support_brightness:
-            return {ColorMode.BRIGHTNESS}
-        return {ColorMode.ONOFF}
+            modes.add(ColorMode.HS)
+        if self._support_color_temp:
+            modes.add(ColorMode.COLOR_TEMP)
+
+        # If no color modes, fall back to brightness or on/off
+        if not modes:
+            if self._support_brightness:
+                modes.add(ColorMode.BRIGHTNESS)
+            else:
+                modes.add(ColorMode.ONOFF)
+
+        return modes
 
     @property
     def color_mode(self):
